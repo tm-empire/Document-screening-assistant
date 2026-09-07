@@ -6,13 +6,7 @@ const AuthContext = createContext(null);
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(() => {
     const saved = localStorage.getItem('sentinel_user');
-    return saved ? JSON.parse(saved) : {
-      user_id: 'USR-OFFICER-01',
-      name: 'Officer John Smith',
-      email: 'officer@sentinel.id',
-      role: 'OFFICER',
-      status: 'ACTIVE'
-    };
+    return saved ? JSON.parse(saved) : null;
   });
 
   const [appsScriptUrl, setAppsScriptUrlState] = useState(() => {
@@ -38,6 +32,7 @@ export const AuthProvider = ({ children }) => {
   const logout = () => {
     setUser(null);
     localStorage.removeItem('sentinel_user');
+    // Do NOT clear sentinel_apps_script_url — it's a configuration setting, not session data
   };
 
   const setAppsScriptUrl = (url) => {

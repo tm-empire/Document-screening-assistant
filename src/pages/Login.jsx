@@ -1,17 +1,27 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Shield, Lock, ArrowRight, UserCheck, ShieldAlert, KeyRound } from 'lucide-react';
+import { Shield, Lock, ArrowRight, UserCheck, ShieldAlert, KeyRound, Info } from 'lucide-react';
 
 export const Login = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('officer@sentinel.id');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [role, setRole] = useState('OFFICER');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!email.trim()) return;
+    
+    // Frontend demo PIN validation
+    if (password !== '1234') {
+      setError('Invalid Demo PIN. Use "1234"');
+      return;
+    }
+
     setLoading(true);
     await login(email, role);
     setLoading(false);
@@ -34,8 +44,8 @@ export const Login = () => {
           <p className="text-xs text-slate-400 font-mono">5-Layer AI-Assisted Risk Engine</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 relative z-10">
-          {/* Quick Role Selector Buttons */}
+        <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4 relative z-10">
+          {/* Access Role Selector Buttons */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-slate-300 block">Select Access Role</label>
             <div className="grid grid-cols-3 gap-2">
@@ -49,10 +59,7 @@ export const Login = () => {
                   <button
                     key={r.id}
                     type="button"
-                    onClick={() => {
-                      setRole(r.id);
-                      setEmail(`${r.id.toLowerCase()}@sentinel.id`);
-                    }}
+                    onClick={() => setRole(r.id)}
                     className={`p-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1 transition-all ${
                       role === r.id
                         ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/60 shadow-md shadow-indigo-600/10'
@@ -68,10 +75,12 @@ export const Login = () => {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-300 block">Work Email</label>
+            <label className="text-xs font-medium text-slate-300 block">Work Email / User ID</label>
             <input
               type="email"
               required
+              autoComplete="off"
+              placeholder="e.g. officer@sentinel.id"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
@@ -79,21 +88,31 @@ export const Login = () => {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-300 block">Security PIN / Access Token</label>
+            <label className="text-xs font-medium text-slate-300 block">Demo Access PIN <span className="text-[10px] text-slate-500">(Not stored)</span></label>
             <div className="relative">
               <input
                 type="password"
-                defaultValue="••••••••"
+                required
+                autoComplete="off"
+                placeholder="Enter 1234..."
+                value={password}
+                onChange={(e) => {setPassword(e.target.value); setError('')}}
                 className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-4 pr-10 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
               />
               <Lock className="w-4 h-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2" />
             </div>
+            {error && <p className="text-[10px] text-red-400 font-medium">{error}</p>}
+          </div>
+
+          <div className="flex items-center gap-2 p-2.5 bg-indigo-900/10 border border-indigo-500/20 rounded-lg">
+            <Info className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+            <p className="text-[10px] text-indigo-300/70">Demo hint: Valid PIN is <code className="bg-indigo-950 px-1 rounded">1234</code> for all roles.</p>
           </div>
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition-all mt-2"
+            disabled={loading || !email.trim() || !password.trim()}
+            className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition-all mt-2 disabled:opacity-50"
           >
             <span>{loading ? 'Authenticating...' : 'Access Verification Console'}</span>
             <ArrowRight className="w-4 h-4" />

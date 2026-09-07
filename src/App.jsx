@@ -55,6 +55,7 @@ export default function App() {
       <CaseProvider>
         <Router>
           <Routes>
+            <Route path="/" element={<Navigate to="/login" replace />} />
             <Route path="/login" element={<Login />} />
             <Route path="/*" element={<ProtectedLayout />} />
           </Routes>

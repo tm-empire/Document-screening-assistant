@@ -14,6 +14,8 @@ function setupDatabase() {
   var schemas = [
     {
       name: "USERS",
+      // NOTE: No password_hash column — PINs are NEVER stored in Google Sheets.
+      // Authentication is email-based identity lookup only. Demo PIN is validated client-side.
       headers: ["user_id", "name", "email", "role", "status", "created_at", "last_login"],
       initialData: [
         ["USR-ADMIN-01", "Chief Admin", "admin@sentinel.id", "ADMIN", "ACTIVE", new Date().toISOString(), new Date().toISOString()],
