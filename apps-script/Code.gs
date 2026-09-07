@@ -41,6 +41,11 @@ function doGet(e) {
         var msg = setupDatabase();
         return createSuccessResponse({ result: msg }, "Database setup complete.");
 
+      case "seedUsers":
+        // Convenience: run user seeder via URL (for testing only — remove in production)
+        var seedMsg = seedUsers();
+        return createSuccessResponse({ result: seedMsg }, "Users seeded successfully.");
+
       default:
         return createErrorResponse("INVALID_ACTION", "Action '" + action + "' is not supported for GET.");
     }
@@ -64,7 +69,9 @@ function doPost(e) {
 
     switch (action) {
       case "login":
-        var loginResult = handleLogin(postData.email, postData.role);
+        // passwordHash is SHA-256 of the plaintext password, computed on the frontend.
+        // Plaintext password never reaches this backend.
+        var loginResult = handleLogin(postData.email, postData.role, postData.passwordHash);
         return createSuccessResponse(loginResult, "Authentication successful.");
 
       case "createCase":

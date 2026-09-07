@@ -15,8 +15,9 @@ export const AuthProvider = ({ children }) => {
            'https://script.google.com/macros/s/AKfycbw_ypd20aO42BVSVnO8uCyb4Uu1NHAJfmNzrYQOLLEYIPLkWHBMvUMwlQqstGHoxGhzTw/exec';
   });
 
-  const login = async (email, role) => {
-    const userData = await authService.login(email, role);
+  const login = async (email, password, role) => {
+    // authService hashes the password with SHA-256 before sending to Apps Script
+    const userData = await authService.login(email, password, role);
     setUser(userData);
     localStorage.setItem('sentinel_user', JSON.stringify(userData));
     return userData;

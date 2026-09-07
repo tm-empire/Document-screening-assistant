@@ -14,6 +14,19 @@
 
 import { mockBackend } from './mockBackend';
 
+/**
+ * Hash a password string using SHA-256 (Web Crypto API).
+ * Result is lowercase hex, matching what hashPassword() in Apps Script produces.
+ * The plaintext password NEVER leaves the browser.
+ */
+async function hashPasswordSHA256(password) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 const getAppsScriptUrl = () => {
   return localStorage.getItem('sentinel_apps_script_url') || 
          import.meta.env.VITE_APPS_SCRIPT_URL || 
@@ -53,17 +66,25 @@ async function callAppsScript(action, payload = {}, method = 'POST') {
 }
 
 export const authService = {
-  login: async (email, role) => {
+  login: async (email, password, role) => {
     const appsScriptUrl = getAppsScriptUrl();
     if (appsScriptUrl) {
       try {
-        const res = await callAppsScript('login', { email, role });
+        // Hash password in browser before sending — plaintext never leaves the client
+        const passwordHash = await hashPasswordSHA256(password);
+        const res = await callAppsScript('login', { email, role, passwordHash });
         if (res.success) return res.data;
+        // If Apps Script returns AUTH_FAILED, surface the error to the user
+        if (res.error && res.error.startsWith('AUTH_FAILED')) {
+          throw new Error(res.message || 'Authentication failed.');
+        }
       } catch (e) {
-        console.warn('Falling back to mock authentication:', e.message);
+        // Re-throw auth errors (wrong password etc.) — don't fall back to mock for these
+        if (e.message && e.message.includes('AUTH_FAILED')) throw e;
+        console.warn('Apps Script unreachable, using mock auth:', e.message);
       }
     }
-    // Mock Fallback
+    // Mock Fallback (used when Apps Script URL not configured)
     return {
       user_id: `USR-${role}-${Math.floor(100 + Math.random() * 900)}`,
       name: email.split('@')[0].toUpperCase(),

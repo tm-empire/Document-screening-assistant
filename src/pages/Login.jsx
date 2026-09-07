@@ -1,37 +1,38 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Shield, Lock, ArrowRight, UserCheck, ShieldAlert, KeyRound, Info } from 'lucide-react';
+import { Shield, Lock, ArrowRight, UserCheck, ShieldAlert, KeyRound, AlertCircle, Info } from 'lucide-react';
 
 export const Login = () => {
-  const { login } = useAuth();
+  const { login, appsScriptUrl } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('OFFICER');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [role, setRole]         = useState('OFFICER');
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!email.trim()) return;
-    
-    // Frontend demo PIN validation
-    if (password !== '1234') {
-      setError('Invalid Demo PIN. Use "1234"');
-      return;
-    }
-
+    if (!email.trim() || !password.trim()) return;
+    setError('');
     setLoading(true);
-    await login(email, role);
-    setLoading(false);
-    navigate('/dashboard');
+    try {
+      // Password is hashed by authService before being sent to Apps Script
+      await login(email, password, role);
+      navigate('/dashboard');
+    } catch (err) {
+      // Surface auth errors (wrong password, user not found, etc.)
+      setError(err.message?.replace('AUTH_FAILED: ', '') || 'Authentication failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
       <div className="max-w-md w-full glass-panel border border-slate-800 rounded-2xl p-8 space-y-6 shadow-2xl relative overflow-hidden">
-        {/* Subtle background glow */}
+        {/* Background glow */}
         <div className="absolute -top-24 -left-24 w-48 h-48 bg-indigo-600/20 rounded-full blur-3xl" />
         <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-purple-600/20 rounded-full blur-3xl" />
 
@@ -45,14 +46,14 @@ export const Login = () => {
         </div>
 
         <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4 relative z-10">
-          {/* Access Role Selector Buttons */}
+          {/* Role selector */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-slate-300 block">Select Access Role</label>
             <div className="grid grid-cols-3 gap-2">
               {[
-                { id: 'OFFICER', label: 'Officer', icon: UserCheck },
+                { id: 'OFFICER',    label: 'Officer',    icon: UserCheck  },
                 { id: 'SUPERVISOR', label: 'Supervisor', icon: ShieldAlert },
-                { id: 'ADMIN', label: 'Admin', icon: KeyRound }
+                { id: 'ADMIN',      label: 'Admin',      icon: KeyRound   }
               ].map(r => {
                 const Icon = r.icon;
                 return (
@@ -74,40 +75,59 @@ export const Login = () => {
             </div>
           </div>
 
+          {/* Email */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-slate-300 block">Work Email / User ID</label>
             <input
               type="email"
+              name="sentinel-email"
               required
-              autoComplete="off"
               placeholder="e.g. officer@sentinel.id"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+              onChange={e => { setEmail(e.target.value); setError(''); }}
+              autoComplete="off"
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
             />
           </div>
 
+          {/* Password */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-300 block">Demo Access PIN <span className="text-[10px] text-slate-500">(Not stored)</span></label>
+            <label className="text-xs font-medium text-slate-300 block">
+              Password
+              <span className="ml-2 text-[10px] text-emerald-500/80 font-mono">SHA-256 hashed before sending</span>
+            </label>
             <div className="relative">
               <input
                 type="password"
+                name="sentinel-password"
                 required
-                autoComplete="off"
-                placeholder="Enter 1234..."
+                placeholder="Enter your password..."
                 value={password}
-                onChange={(e) => {setPassword(e.target.value); setError('')}}
-                className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-4 pr-10 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                onChange={e => { setPassword(e.target.value); setError(''); }}
+                autoComplete="new-password"
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-4 pr-10 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
               />
               <Lock className="w-4 h-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2" />
             </div>
-            {error && <p className="text-[10px] text-red-400 font-medium">{error}</p>}
           </div>
 
-          <div className="flex items-center gap-2 p-2.5 bg-indigo-900/10 border border-indigo-500/20 rounded-lg">
-            <Info className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-            <p className="text-[10px] text-indigo-300/70">Demo hint: Valid PIN is <code className="bg-indigo-950 px-1 rounded">1234</code> for all roles.</p>
-          </div>
+          {/* Error message */}
+          {error && (
+            <div className="flex items-start gap-2 p-3 bg-rose-900/20 border border-rose-500/30 rounded-lg">
+              <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
+              <p className="text-[11px] text-rose-300">{error}</p>
+            </div>
+          )}
+
+          {/* Demo hint (only shown when no Apps Script configured) */}
+          {!appsScriptUrl && (
+            <div className="flex items-center gap-2 p-2.5 bg-indigo-900/10 border border-indigo-500/20 rounded-lg">
+              <Info className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+              <p className="text-[10px] text-indigo-300/70">
+                Demo mode — use any email &amp; any password. Connect Apps Script in Settings for real auth.
+              </p>
+            </div>
+          )}
 
           <button
             type="submit"
@@ -120,7 +140,7 @@ export const Login = () => {
         </form>
 
         <div className="text-center text-[11px] text-slate-500 font-mono border-t border-slate-800/80 pt-4 relative z-10">
-          Powered by Google Apps Script API & Google Sheets
+          Powered by Google Apps Script &amp; Google Sheets
         </div>
       </div>
     </div>

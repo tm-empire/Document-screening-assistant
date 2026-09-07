@@ -14,14 +14,11 @@ function setupDatabase() {
   var schemas = [
     {
       name: "USERS",
-      // NOTE: No password_hash column — PINs are NEVER stored in Google Sheets.
-      // Authentication is email-based identity lookup only. Demo PIN is validated client-side.
-      headers: ["user_id", "name", "email", "role", "status", "created_at", "last_login"],
-      initialData: [
-        ["USR-ADMIN-01", "Chief Admin", "admin@sentinel.id", "ADMIN", "ACTIVE", new Date().toISOString(), new Date().toISOString()],
-        ["USR-OFFICER-01", "Officer John Smith", "officer@sentinel.id", "OFFICER", "ACTIVE", new Date().toISOString(), new Date().toISOString()],
-        ["USR-SUPER-01", "Supervisor Sarah Conner", "supervisor@sentinel.id", "SUPERVISOR", "ACTIVE", new Date().toISOString(), new Date().toISOString()]
-      ]
+      // password_hash stores SHA-256 hex — plaintext passwords are NEVER stored.
+      // Run seedUsers() in Apps Script editor to populate users after setupDatabase().
+      headers: ["user_id", "name", "email", "password_hash", "role", "status", "created_at", "last_login"],
+      initialData: []
+      // ↑ No default rows here. Use seedUsers() to create accounts safely.
     },
     {
       name: "VERIFICATION_CASES",

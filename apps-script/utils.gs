@@ -3,6 +3,25 @@
  */
 
 /**
+ * Hash a plaintext password using SHA-256 via Apps Script Utilities.
+ * Returns lowercase hex string. Same algorithm used on the frontend.
+ *
+ * @param {string} password - Plaintext password
+ * @returns {string} SHA-256 hex hash
+ */
+function hashPassword(password) {
+  var digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    password,
+    Utilities.Charset.UTF_8
+  );
+  return digest.map(function(b) {
+    // Convert signed byte (-128..127) to unsigned (0..255), then to 2-char hex
+    return (b < 0 ? b + 256 : b).toString(16).padStart(2, '0');
+  }).join('');
+}
+
+/**
  * Standard Success Response JSON
  */
 function createSuccessResponse(data, message) {
