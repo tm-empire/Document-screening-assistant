@@ -2,22 +2,39 @@
  * SentinelID — Client-Side Mock Database Engine
  * Simulates Google Apps Script + Google Sheets API actions in-memory & localStorage.
  * Enables instant standalone execution without requiring immediate Apps Script Web App deployment.
+ *
+ * CHANGED FROM THE ORIGINAL FILE:
+ * - `getCase()` no longer falls back to a hardcoded fake verification bundle
+ *   ("Eleanor Vance", "1992-04-14", "DOC-9988221", ocr_confidence 0.94, etc.) when
+ *   no cached result exists. A case that hasn't been verified yet now genuinely
+ *   reports `verification_available: false` and null layer objects — the UI should
+ *   show "not yet verified", not fabricated evidence. This only affects what's
+ *   returned when there IS no result; once `startVerification` (or
+ *   `saveVerificationLayer`, called from api.js) has run, real results are returned
+ *   exactly as computed.
+ * - `startVerification()` no longer calls the layer functions with old
+ *   (file, scenario) signatures — layer2_face.js / layer3_forensics.js no longer
+ *   accept a `simulatedScenario` argument at all, since there's nothing left to
+ *   fake. It now delegates to verificationOrchestrator.js, the same pipeline
+ *   api.js uses, so there is exactly one place the 5-layer flow is wired up.
+ * - New `saveVerificationLayer(caseId, layerName, data)` — this is what
+ *   verificationOrchestrator.js's `persistLayerResult` callback writes to when
+ *   API 1 isn't configured/reachable. It merges into the cached result bundle
+ *   incrementally (Phase 11: never lose intermediate evidence) instead of only
+ *   writing once at the very end.
+ * - Removed the unused `MOCK_ISSUER_REGISTRY` import — government matching is
+ *   now handled by governmentApi.js / layer4_consistency.js, not a local array.
  */
 
-import { MOCK_INITIAL_CASES, MOCK_USERS, MOCK_ISSUER_REGISTRY } from '../data/mockData';
-import { runLayer1Ocr } from './layer1_ocr';
-import { runLayer2Face } from './layer2_face';
-import { runLayer3Forensics } from './layer3_forensics';
-import { runLayer4Consistency } from './layer4_consistency';
-import { runLayer5RiskEngine } from './layer5_riskEngine';
+import { MOCK_INITIAL_CASES, MOCK_USERS } from '../data/mockData';
+import { runVerificationPipeline } from './verificationOrchestrator';
 
 const STORAGE_KEYS = {
   CASES: 'sentinel_cases',
   USERS: 'sentinel_users',
-  AUDIT_LOGS: 'sentinel_audit_logs'
+  AUDIT_LOGS: 'sentinel_audit_logs',
 };
 
-// Initialize Storage with default synthetic demo data if empty
 function initializeStorage() {
   if (!localStorage.getItem(STORAGE_KEYS.CASES)) {
     localStorage.setItem(STORAGE_KEYS.CASES, JSON.stringify(MOCK_INITIAL_CASES));
@@ -28,13 +45,13 @@ function initializeStorage() {
   if (!localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS)) {
     const initialLogs = [
       {
-        log_id: "LOG-101",
-        user_id: "USR-ADMIN-01",
-        case_id: "SYSTEM",
-        action: "SYSTEM_INITIALIZED",
+        log_id: 'LOG-101',
+        user_id: 'USR-ADMIN-01',
+        case_id: 'SYSTEM',
+        action: 'SYSTEM_INITIALIZED',
         timestamp: new Date().toISOString(),
-        details: "SentinelID 5-Layer Verification Engine initialized."
-      }
+        details: 'SentinelID 5-Layer Verification Engine initialized.',
+      },
     ];
     localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(initialLogs));
   }
@@ -42,76 +59,38 @@ function initializeStorage() {
 
 initializeStorage();
 
+function getCachedResults(caseId) {
+  const stored = localStorage.getItem(`sentinel_results_${caseId}`);
+  return stored ? JSON.parse(stored) : null;
+}
+
 export const mockBackend = {
-  // Cases
   getCases: async () => {
     const cases = JSON.parse(localStorage.getItem(STORAGE_KEYS.CASES) || '[]');
-    return { success: true, data: cases, message: "Cases retrieved" };
+    return { success: true, data: cases, message: 'Cases retrieved' };
   },
 
   getCase: async (caseId) => {
     const cases = JSON.parse(localStorage.getItem(STORAGE_KEYS.CASES) || '[]');
-    const caseItem = cases.find(c => c.case_id === caseId);
+    const caseItem = cases.find((c) => c.case_id === caseId);
     if (!caseItem) {
-      return { success: false, error: "CASE_NOT_FOUND", message: "Case not found" };
+      return { success: false, error: 'CASE_NOT_FOUND', message: 'Case not found' };
     }
 
-    // Retrieve cached verification results or build mock layer bundle
-    const storedResults = localStorage.getItem(`sentinel_results_${caseId}`);
-    const results = storedResults ? JSON.parse(storedResults) : null;
+    const results = getCachedResults(caseId);
 
     return {
       success: true,
       data: {
         case: caseItem,
-        layer1_ocr: results?.layer1_ocr || {
-          status: "PASS",
-          ocr_confidence: 0.94,
-          extracted_fields: {
-            name: caseItem.subject_name,
-            dob: "1992-04-14",
-            document_number: "DOC-9988221",
-            issue_date: "2020-01-10",
-            expiry_date: "2030-01-10"
-          }
-        },
-        layer2_face: results?.layer2_face || {
-          face_detected: true,
-          similarity_score: caseItem.risk_level === "HIGH" ? 0.38 : 0.94,
-          match: caseItem.risk_level !== "HIGH",
-          liveness: "PASS"
-        },
-        layer3_forensics: results?.layer3_forensics || {
-          status: caseItem.risk_level === "HIGH" ? "SUSPICIOUS" : "NORMAL",
-          tampering_score: caseItem.risk_level === "HIGH" ? 0.78 : 0.12,
-          explanation: caseItem.risk_level === "HIGH"
-            ? "Error Level Analysis detected compression anomalies in face boundary."
-            : "Uniform image compression across entire document surface.",
-          suspicious_regions: caseItem.risk_level === "HIGH" ? [{ x: 120, y: 75, width: 130, height: 150, label: "Face boundary compression mismatch" }] : []
-        },
-        layer4_consistency: results?.layer4_consistency || {
-          name_match: true,
-          dob_match: true,
-          document_number_match: true,
-          date_valid: true,
-          consistency_status: "VERIFIED"
-        },
-        layer4_issuer: results?.layer4_issuer || {
-          issuer_found: true,
-          name_match: true,
-          dob_match: true,
-          document_status: caseItem.risk_level === "HIGH" ? "REVOKED" : "VALID",
-          issuer_name: "National Identity Authority (Synthetic Demo Registry)"
-        },
-        layer5_risk: results?.layer5_risk || {
-          risk_score: caseItem.risk_score,
-          risk_level: caseItem.risk_level,
-          decision: caseItem.status,
-          reasons: caseItem.risk_level === "HIGH"
-            ? ["Face mismatch detected (38% similarity).", "Issuer registry status is REVOKED.", "High document tampering score (78%)."]
-            : ["All layer verification checks passed standard validation thresholds."]
-        }
-      }
+        verification_available: !!results,
+        layer1_ocr: results?.layer1_ocr || null,
+        layer2_face: results?.layer2_face || null,
+        layer3_forensics: results?.layer3_forensics || null,
+        layer4_consistency: results?.layer4_consistency ?? results?.layer4_government?.data_consistency ?? null,
+        layer4_issuer: results?.layer4_issuer ?? results?.layer4_government?.issuer_verification ?? null,
+        layer5_risk: results?.layer5_risk || null,
+      },
     };
   },
 
@@ -122,109 +101,117 @@ export const mockBackend = {
 
     const newCase = {
       case_id: newCaseId,
-      subject_name: data.subject_name || "Unknown Subject",
-      created_by: userEmail || "officer@sentinel.id",
-      assigned_to: data.assigned_to || userEmail || "officer@sentinel.id",
-      status: "PROCESSING",
-      risk_level: "PENDING",
+      subject_name: data.subject_name || 'Unknown Subject',
+      created_by: userEmail || 'officer@sentinel.id',
+      assigned_to: data.assigned_to || userEmail || 'officer@sentinel.id',
+      status: 'PROCESSING',
+      risk_level: 'PENDING',
       risk_score: 0,
       created_at: now,
-      updated_at: now
+      updated_at: now,
     };
 
     cases.unshift(newCase);
     localStorage.setItem(STORAGE_KEYS.CASES, JSON.stringify(cases));
-    mockBackend.addAuditLog(userEmail || "OFFICER", newCaseId, "CREATE_CASE", `Created verification case for ${newCase.subject_name}`);
+    mockBackend.addAuditLog(userEmail || 'OFFICER', newCaseId, 'CREATE_CASE', `Created verification case for ${newCase.subject_name}`);
 
-    return { success: true, data: newCase, message: "Case created successfully" };
+    return { success: true, data: newCase, message: 'Case created successfully' };
   },
 
-  startVerification: async (caseId, docFile, faceFile, subjectDetails, scenario = 'NORMAL') => {
-    const l1 = await runLayer1Ocr(docFile, subjectDetails);
-    const l2 = await runLayer2Face(docFile, faceFile, scenario);
-    const l3 = await runLayer3Forensics(docFile, scenario);
-    const cases = JSON.parse(localStorage.getItem(STORAGE_KEYS.CASES) || '[]');
-    const l4 = await runLayer4Consistency(l1, subjectDetails, cases);
-    const l5 = runLayer5RiskEngine(l1, l2, l3, l4);
+  /**
+   * Merges one layer's real result into the cached bundle for a case, and — once
+   * layer5_risk arrives — updates the case's risk_level/risk_score/status in the
+   * case list too. Called incrementally by verificationOrchestrator.js via
+   * api.js's or this file's own `persistLayerResult` callback, so evidence is never
+   * lost even if a later layer fails.
+   */
+  saveVerificationLayer: (caseId, layerName, data) => {
+    const existing = getCachedResults(caseId) || { case_id: caseId };
+    existing[layerName] = data;
+    localStorage.setItem(`sentinel_results_${caseId}`, JSON.stringify(existing));
 
-    const fullResult = {
-      case_id: caseId,
-      layer1_ocr: l1,
-      layer2_face: l2,
-      layer3_forensics: l3,
-      layer4_consistency: l4.data_consistency,
-      layer4_issuer: l4.issuer_verification,
-      layer5_risk: l5
-    };
-
-    // Cache results
-    localStorage.setItem(`sentinel_results_${caseId}`, JSON.stringify(fullResult));
-
-    // Update case record in list
-    const caseIndex = cases.findIndex(c => c.case_id === caseId);
-    if (caseIndex !== -1) {
-      cases[caseIndex].risk_level = l5.risk_level;
-      cases[caseIndex].risk_score = l5.risk_score;
-      cases[caseIndex].status = l5.decision;
-      cases[caseIndex].updated_at = new Date().toISOString();
-      localStorage.setItem(STORAGE_KEYS.CASES, JSON.stringify(cases));
+    if (layerName === 'layer5_risk') {
+      const cases = JSON.parse(localStorage.getItem(STORAGE_KEYS.CASES) || '[]');
+      const idx = cases.findIndex((c) => c.case_id === caseId);
+      if (idx !== -1) {
+        cases[idx].risk_level = data.risk_level;
+        cases[idx].risk_score = data.risk_score;
+        cases[idx].status = data.decision;
+        cases[idx].updated_at = new Date().toISOString();
+        localStorage.setItem(STORAGE_KEYS.CASES, JSON.stringify(cases));
+      }
+      mockBackend.addAuditLog('SYSTEM', caseId, 'VERIFICATION_COMPLETE', `5-layer verification finished. Score: ${data.risk_score}, Level: ${data.risk_level}`);
     }
+  },
 
-    mockBackend.addAuditLog("SYSTEM", caseId, "VERIFICATION_COMPLETE", `5-Layer verification finished. Score: ${l5.risk_score}, Level: ${l5.risk_level}`);
+  /**
+   * Standalone entry point (used when nothing else drives the pipeline). Runs the
+   * same real orchestrator api.js uses, persisting every layer locally as it goes.
+   */
+  startVerification: async (caseId, docFile, faceFile, subjectDetails, opts = {}) => {
+    const cases = JSON.parse(localStorage.getItem(STORAGE_KEYS.CASES) || '[]');
 
-    return { success: true, data: fullResult, message: "Verification complete" };
+    const finalResult = await runVerificationPipeline({
+      caseId,
+      docFile,
+      liveFaceFile: faceFile,
+      livenessFrames: opts.livenessFrames,
+      subjectDetails,
+      historicalCases: cases,
+      onProgress: opts.onProgress,
+      persistLayerResult: async (cid, layerName, data) => mockBackend.saveVerificationLayer(cid, layerName, data),
+    });
+
+    return { success: true, data: finalResult, message: 'Verification complete' };
   },
 
   updateStatus: async (caseId, status, notes, userEmail) => {
     const cases = JSON.parse(localStorage.getItem(STORAGE_KEYS.CASES) || '[]');
-    const caseIndex = cases.findIndex(c => c.case_id === caseId);
+    const caseIndex = cases.findIndex((c) => c.case_id === caseId);
     if (caseIndex === -1) {
-      return { success: false, error: "NOT_FOUND", message: "Case not found" };
+      return { success: false, error: 'NOT_FOUND', message: 'Case not found' };
     }
 
     cases[caseIndex].status = status;
     cases[caseIndex].updated_at = new Date().toISOString();
     localStorage.setItem(STORAGE_KEYS.CASES, JSON.stringify(cases));
 
-    mockBackend.addAuditLog(userEmail || "OFFICER", caseId, "UPDATE_STATUS", `Officer updated case status to ${status}. Notes: ${notes || "None"}`);
+    mockBackend.addAuditLog(userEmail || 'OFFICER', caseId, 'UPDATE_STATUS', `Officer updated case status to ${status}. Notes: ${notes || 'None'}`);
 
-    return { success: true, data: cases[caseIndex], message: "Status updated" };
+    return { success: true, data: cases[caseIndex], message: 'Status updated' };
   },
 
-  // Audit Logs
   getAuditLogs: async () => {
     const logs = JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS) || '[]');
-    return { success: true, data: logs, message: "Audit logs retrieved" };
+    return { success: true, data: logs, message: 'Audit logs retrieved' };
   },
 
   addAuditLog: (userId, caseId, action, details) => {
     const logs = JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS) || '[]');
     const newLog = {
       log_id: `LOG-${Math.floor(1000 + Math.random() * 9000)}`,
-      user_id: userId || "SYSTEM",
-      case_id: caseId || "GENERAL",
+      user_id: userId || 'SYSTEM',
+      case_id: caseId || 'GENERAL',
       action: action,
       timestamp: new Date().toISOString(),
-      details: typeof details === 'object' ? JSON.stringify(details) : String(details)
+      details: typeof details === 'object' ? JSON.stringify(details) : String(details),
     };
     logs.unshift(newLog);
     localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(logs));
   },
 
-  // Users
   getUsers: async () => {
     const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-    return { success: true, data: users, message: "Users list" };
+    return { success: true, data: users, message: 'Users list' };
   },
 
-  // Stats
   getDashboardStats: async () => {
     const cases = JSON.parse(localStorage.getItem(STORAGE_KEYS.CASES) || '[]');
     const total = cases.length;
-    const low = cases.filter(c => c.risk_level === "LOW").length;
-    const medium = cases.filter(c => c.risk_level === "MEDIUM").length;
-    const high = cases.filter(c => c.risk_level === "HIGH").length;
-    const pendingReview = cases.filter(c => c.status === "MANUAL_REVIEW_REQUIRED" || c.status === "PROCESSING").length;
+    const low = cases.filter((c) => c.risk_level === 'LOW').length;
+    const medium = cases.filter((c) => c.risk_level === 'MEDIUM').length;
+    const high = cases.filter((c) => c.risk_level === 'HIGH').length;
+    const pendingReview = cases.filter((c) => c.status === 'MANUAL_REVIEW_REQUIRED' || c.status === 'PROCESSING').length;
 
     return {
       success: true,
@@ -234,8 +221,8 @@ export const mockBackend = {
         medium_risk: medium,
         high_risk: high,
         pending_review: pendingReview,
-        recent_cases: cases.slice(0, 5)
-      }
+        recent_cases: cases.slice(0, 5),
+      },
     };
-  }
+  },
 };

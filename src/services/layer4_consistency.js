@@ -1,72 +1,74 @@
 /**
- * LAYER 4 — DATA CONSISTENCY & ISSUER VERIFICATION
- * Purpose: Cross-references OCR extracted fields against officer-entered data,
- * checks validity/expiration, and queries the Synthetic/Mock Government Issuer Registry.
+ * LAYER 4 — GOVERNMENT MATCHING & CONSISTENCY (real implementation)
+ *
+ * REPLACES the old local `MOCK_ISSUER_REGISTRY` array lookup (a JS array shipped to
+ * the browser) with a real call to API 2 via governmentApi.js. Also compares
+ * Layer 1's OCR-extracted fields against the returned government record.
+ *
+ * ADAPTER NOTE (Phase 18 — prefer an adapter over rewriting unrelated UI): the
+ * existing result-page components likely expect a `data_consistency` object and an
+ * `issuer_verification` object (the shapes the old mock produced). Rather than
+ * rewrite those components sight-unseen, this function returns the new canonical
+ * `government_match` object (Phase 9) AND both adapted legacy shapes, mapped from
+ * the same real evidence — nothing is fabricated to fill either shape.
  */
 
-import { MOCK_ISSUER_REGISTRY } from '../data/mockData';
+import { matchGovernmentIdentity } from './governmentApi';
 
-export function runLayer4Consistency(ocrData, subjectDetails, historicalCases = []) {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const extracted = ocrData?.extracted_fields || {};
-      const enteredName = (subjectDetails?.name || "").toLowerCase().trim();
-      const extractedName = (extracted.name || "").toLowerCase().trim();
+export async function runLayer4Consistency(ocrData, subjectDetails, historicalCases = []) {
+  const extracted = ocrData?.extracted_fields || {};
 
-      const nameMatch = enteredName === extractedName || enteredName.includes(extractedName) || extractedName.includes(enteredName);
-      const dobMatch = subjectDetails?.dob === extracted.dob;
-      const docNumMatch = subjectDetails?.document_number === extracted.document_number;
+  const govResult = await matchGovernmentIdentity(extracted);
 
-      // Expiry Check
-      let dateValid = true;
-      if (extracted.expiry_date) {
-        dateValid = new Date(extracted.expiry_date) > new Date();
-      }
+  // Duplicate-in-this-system check stays local — it's about this application's own
+  // case history in API 1, not something the government source would know about.
+  const enteredName = String(subjectDetails?.name || extracted.name || '').toLowerCase().trim();
+  const duplicateInHistory =
+    !!enteredName &&
+    historicalCases.some((c) => String(c.subject_name || '').toLowerCase().trim() === enteredName && c.status === 'REJECTED');
 
-      // Duplicate Check in historical database
-      const duplicateDetected = historicalCases.some(c => 
-        c.subject_name.toLowerCase() === enteredName && c.status === "REJECTED"
-      );
+  let dateValid = true;
+  if (extracted.expiry_date) {
+    const parsed = new Date(extracted.expiry_date);
+    if (!Number.isNaN(parsed.getTime())) dateValid = parsed > new Date();
+  }
 
-      const consistencyStatus = (nameMatch && dobMatch && docNumMatch && dateValid && !duplicateDetected) 
-        ? "VERIFIED" 
-        : "INCONSISTENT";
+  const consistencyStatus =
+    govResult.government_record_found &&
+    govResult.name_match &&
+    govResult.dob_match &&
+    dateValid &&
+    !duplicateInHistory &&
+    !govResult.duplicate_detected
+      ? 'VERIFIED'
+      : 'INCONSISTENT';
 
-      const consistencyExplanation = consistencyStatus === "VERIFIED"
-        ? "All extracted fields match officer-entered values seamlessly. Document date structure is valid."
-        : "Field discrepancies or expiration issues identified during deterministic cross-validation.";
+  return {
+    // Phase-9 canonical shape — this is what Layer 5 and any new UI should read from.
+    government_match: govResult,
 
-      // Issuer Registry Query (Synthetic Registry — Demo Data)
-      const docNum = subjectDetails?.document_number || extracted.document_number || "";
-      const registryRecord = MOCK_ISSUER_REGISTRY.find(r => 
-        r.document_number.toLowerCase() === docNum.toLowerCase()
-      );
-
-      const issuerFound = !!registryRecord;
-      const issuerNameMatch = registryRecord ? (registryRecord.name.toLowerCase() === extractedName) : false;
-      const issuerDobMatch = registryRecord ? (registryRecord.dob === extracted.dob) : false;
-      const documentStatus = registryRecord ? registryRecord.document_status : "NOT_FOUND";
-      const issuerName = registryRecord ? registryRecord.issuer_name : "Synthetic Issuer Registry (Unlisted Record)";
-
-      resolve({
-        data_consistency: {
-          name_match: nameMatch,
-          dob_match: dobMatch,
-          document_number_match: docNumMatch,
-          date_valid: dateValid,
-          duplicate_detected: duplicateDetected,
-          status: consistencyStatus,
-          explanation: consistencyExplanation
-        },
-        issuer_verification: {
-          issuer_found: issuerFound,
-          name_match: issuerNameMatch,
-          dob_match: issuerDobMatch,
-          document_status: documentStatus,
-          issuer_name: issuerName,
-          disclaimer: "Mock/Synthetic Registry — Demo Data"
-        }
-      });
-    }, 1300);
-  });
+    // --- Legacy adapter shapes below, for the existing result-page UI -------------
+    data_consistency: {
+      name_match: govResult.name_match,
+      dob_match: govResult.dob_match,
+      document_number_match: govResult.document_number_match,
+      date_valid: dateValid,
+      duplicate_detected: duplicateInHistory || govResult.duplicate_detected,
+      status: consistencyStatus,
+      explanation: govResult.government_record_found
+        ? `Compared OCR-extracted fields against the matched government record (${govResult.match_method || 'unknown method'}).`
+        : govResult.explanation,
+    },
+    issuer_verification: {
+      issuer_found: govResult.government_record_found,
+      name_match: govResult.name_match,
+      dob_match: govResult.dob_match,
+      document_status: govResult.document_status,
+      issuer_name: 'Synthetic Government Identity Source (API 2)',
+      person_id: govResult.person_id,
+      document_id: govResult.document_id,
+      confidence: govResult.confidence,
+      disclaimer: 'Synthetic/demo government data source — SIH MVP, not a live government database.',
+    },
+  };
 }
